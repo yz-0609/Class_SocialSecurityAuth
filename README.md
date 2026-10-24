@@ -1,6 +1,6 @@
 # 基于人脸识别的社保身份认证系统
 
-《信息系统应用开发》课题二十二。202407Z班，杨泽，20242005。
+《信息系统应用开发》课题二十二。
 
 使用 C#、Windows Forms、.NET Framework 4.5.2、SQL Server 和课堂 `FacePlatformCtrl.BioFPCtrl`。只实现任务书规定的管理、登记、认证、记录和统计功能。
 
