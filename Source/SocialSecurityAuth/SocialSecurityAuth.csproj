@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+ <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+ <PropertyGroup>
+  <Configuration Condition="'$(Configuration)'==''">Debug</Configuration><Platform Condition="'$(Platform)'==''">x86</Platform>
+  <ProjectGuid>{8E3867CE-16E9-4A3A-9D48-76DB3B880622}</ProjectGuid><OutputType>WinExe</OutputType><RootNamespace>SocialSecurityAuth</RootNamespace><AssemblyName>SocialSecurityAuth</AssemblyName><TargetFrameworkVersion>v4.5.2</TargetFrameworkVersion><FileAlignment>512</FileAlignment><AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects><PlatformTarget>x86</PlatformTarget><Prefer32Bit>true</Prefer32Bit>
+ </PropertyGroup>
+ <PropertyGroup Condition="'$(Configuration)'=='Debug'"><DebugSymbols>true</DebugSymbols><DebugType>full</DebugType><Optimize>false</Optimize><OutputPath>..\..\Build\Debug\</OutputPath><DefineConstants>DEBUG;TRACE</DefineConstants><WarningLevel>4</WarningLevel></PropertyGroup>
+ <PropertyGroup Condition="'$(Configuration)'=='Release'"><DebugType>pdbonly</DebugType><Optimize>true</Optimize><OutputPath>..\..\Build\Release\</OutputPath><DefineConstants>TRACE</DefineConstants><WarningLevel>4</WarningLevel></PropertyGroup>
+ <ItemGroup><Reference Include="System"/><Reference Include="System.Core"/><Reference Include="System.Configuration"/><Reference Include="System.Data"/><Reference Include="System.Drawing"/><Reference Include="System.Windows.Forms"/><Reference Include="System.Xml"/>
+  <Reference Include="FacePlatformAx"><HintPath>Lib\FacePlatformAx.dll</HintPath><Private>True</Private></Reference>
+  <Reference Include="FacePlatformCtrl"><HintPath>Lib\FacePlatformCtrl.dll</HintPath><Private>True</Private></Reference>
+ </ItemGroup>
+ <ItemGroup>
+  <Compile Include="Program.cs"/><Compile Include="Models.cs"/><Compile Include="PasswordHasher.cs"/><Compile Include="Database.cs"/><Compile Include="AppRepository.cs"/><Compile Include="FaceService.cs"/><Compile Include="Ui.cs"/>
+  <Compile Include="SplashForm.cs"><SubType>Form</SubType></Compile><Compile Include="LoginForm.cs"><SubType>Form</SubType></Compile>
+  <Compile Include="MainForm.cs"><SubType>Form</SubType></Compile><Compile Include="MainForm.Designer.cs"><DependentUpon>MainForm.cs</DependentUpon></Compile>
+  <Compile Include="ManageForm.cs"><SubType>Form</SubType></Compile><Compile Include="ManageForm.Layout.cs"><DependentUpon>ManageForm.cs</DependentUpon></Compile>
+  <Compile Include="Properties\AssemblyInfo.cs"/><None Include="App.config"/>
+  <Content Include="..\..\Database\00_CreateDatabase.sql"><Link>Database\00_CreateDatabase.sql</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+  <Content Include="..\..\Runtime\*.dll"><Link>%(Filename)%(Extension)</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+  <Content Include="..\..\Runtime\Sound\*.wav"><Link>Sound\%(Filename)%(Extension)</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+ </ItemGroup>
+ <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets"/>
+</Project>

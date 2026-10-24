@@ -1,0 +1,49 @@
+# Generated output and IDE state (keep SDK dependencies in Runtime/ and Source/**/Lib/).
+/Build/
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.pdb
+*.cache
+
+# Local databases, backups, biometric data and logs.
+*.mdf
+*.ldf
+*.ndf
+*.bak
+*.bacpac
+*.db
+*.sqlite
+*.sqlite3
+*.dmp
+/LocalData/
+/FaceData/
+/Logs/
+*.log
+
+# Machine-specific secrets and certificates.
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Packages and temporary files.
+*.zip
+*.7z
+*.rar
+/tmp/
+/Temp/
+~$*
+*.tmp
+*.temp
+Thumbs.db
+Desktop.ini
