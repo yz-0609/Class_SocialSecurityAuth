@@ -6,4 +6,4 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyProduct("SocialSecurityAuth")]
 [assembly: ComVisible(false)]
 [assembly: Guid("db83c0bf-5a6e-4ada-aa30-f29b90a75bc7")]
-[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyVersion("1.0.8.0")]

@@ -16,7 +16,9 @@ CREATE TABLE dbo.Person (
  PersonName nvarchar(50) NOT NULL,
  Gender nvarchar(2) NOT NULL CONSTRAINT CK_Person_Gender CHECK(Gender IN (N'男',N'女')),
  UnitId int NOT NULL CONSTRAINT FK_Person_Unit REFERENCES dbo.Unit(UnitId),
- CreatedAt datetime2 NOT NULL CONSTRAINT DF_Person_Time DEFAULT(SYSDATETIME())
+ CreatedAt datetime2 NOT NULL CONSTRAINT DF_Person_Time DEFAULT(SYSDATETIME()),
+ LastAuthTime datetime2 NULL,
+ LastAuthPassed bit NULL
 );
 IF OBJECT_ID(N'dbo.FaceTemplate',N'U') IS NULL
 CREATE TABLE dbo.FaceTemplate (
@@ -37,76 +39,73 @@ IF OBJECT_ID(N'dbo.AuthenticationRecord',N'U') IS NULL
 CREATE TABLE dbo.AuthenticationRecord (
  RecordId bigint IDENTITY(1,1) NOT NULL CONSTRAINT PK_AuthenticationRecord PRIMARY KEY,
  PersonId int NULL CONSTRAINT FK_Authentication_Person REFERENCES dbo.Person(PersonId),
- AuthTime datetime2 NOT NULL CONSTRAINT DF_Authentication_Time DEFAULT(SYSDATETIME()),
- Passed bit NOT NULL,
- FailureReason nvarchar(200) NULL,
- ClaimRecorded bit NOT NULL,
- ClaimTime datetime2 NULL,
- ClaimSocialNo nvarchar(30) NULL,
- ArchivedSocialNo nvarchar(30) NULL,
+ ClaimSocialNo nvarchar(30) NOT NULL,
+ ClaimTime datetime2 NOT NULL,
  ArchivedPersonName nvarchar(50) NULL,
  ArchivedUnitId int NULL,
  ArchivedUnitName nvarchar(100) NULL,
- CONSTRAINT CK_Authentication_Result CHECK (
-  (Passed=1 AND (PersonId IS NOT NULL OR (ArchivedSocialNo IS NOT NULL AND ArchivedPersonName IS NOT NULL AND ArchivedUnitId IS NOT NULL AND ArchivedUnitName IS NOT NULL)) AND FailureReason IS NULL
-   AND ((ClaimRecorded=1 AND ClaimTime IS NOT NULL AND ClaimSocialNo IS NOT NULL) OR (ClaimRecorded=0 AND ClaimTime IS NULL AND ClaimSocialNo IS NULL)))
-  OR (Passed=0 AND ClaimRecorded=0 AND ClaimTime IS NULL AND ClaimSocialNo IS NULL AND FailureReason IS NOT NULL))
+ CONSTRAINT CK_Authentication_Archive CHECK (
+  PersonId IS NOT NULL OR (ArchivedPersonName IS NOT NULL AND ArchivedUnitId IS NOT NULL AND ArchivedUnitName IS NOT NULL))
 );
 GO
--- 升级已有数据库：人员删除后，历史记录保留删除时的身份信息。
+-- 旧版曾把最新认证状态和首次领取存在同一张表。
 IF COL_LENGTH(N'dbo.Person',N'LastAuthTime') IS NULL
  ALTER TABLE dbo.Person ADD LastAuthTime datetime2 NULL;
 IF COL_LENGTH(N'dbo.Person',N'LastAuthPassed') IS NULL
  ALTER TABLE dbo.Person ADD LastAuthPassed bit NULL;
-IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedSocialNo') IS NULL
- ALTER TABLE dbo.AuthenticationRecord ADD ArchivedSocialNo nvarchar(30) NULL;
-IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedPersonName') IS NULL
- ALTER TABLE dbo.AuthenticationRecord ADD ArchivedPersonName nvarchar(50) NULL;
-IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedUnitId') IS NULL
- ALTER TABLE dbo.AuthenticationRecord ADD ArchivedUnitId int NULL;
-IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedUnitName') IS NULL
- ALTER TABLE dbo.AuthenticationRecord ADD ArchivedUnitName nvarchar(100) NULL;
-IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ClaimSocialNo') IS NULL
- ALTER TABLE dbo.AuthenticationRecord ADD ClaimSocialNo nvarchar(30) NULL;
 GO
 SET XACT_ABORT ON;
 BEGIN TRANSACTION;
-IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.AuthenticationRecord') AND name=N'UX_Auth_ClaimSocialNo')
+IF COL_LENGTH(N'dbo.AuthenticationRecord',N'Passed') IS NOT NULL
 BEGIN
- IF EXISTS(SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.AuthenticationRecord') AND name=N'CK_Authentication_Result')
-  ALTER TABLE dbo.AuthenticationRecord DROP CONSTRAINT CK_Authentication_Result;
- -- 旧数据保留全部认证记录，每个社保编号仅保留最早一次领取登记。
+ IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ClaimSocialNo') IS NULL
+  ALTER TABLE dbo.AuthenticationRecord ADD ClaimSocialNo nvarchar(30) NULL;
+ IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedSocialNo') IS NULL
+  ALTER TABLE dbo.AuthenticationRecord ADD ArchivedSocialNo nvarchar(30) NULL;
+ IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedPersonName') IS NULL
+  ALTER TABLE dbo.AuthenticationRecord ADD ArchivedPersonName nvarchar(50) NULL;
+ IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedUnitId') IS NULL
+  ALTER TABLE dbo.AuthenticationRecord ADD ArchivedUnitId int NULL;
+ IF COL_LENGTH(N'dbo.AuthenticationRecord',N'ArchivedUnitName') IS NULL
+  ALTER TABLE dbo.AuthenticationRecord ADD ArchivedUnitName nvarchar(100) NULL;
+
+ -- 仅编译旧版迁移语句，避免新表引用已删除的列。
+ EXEC(N'
+ IF OBJECT_ID(N''dbo.CK_Authentication_FirstClaim'',N''C'') IS NULL
+ BEGIN
+  UPDATE p SET LastAuthTime=a.AuthTime,LastAuthPassed=a.Passed
+   FROM dbo.Person p
+   CROSS APPLY(SELECT TOP(1) AuthTime,Passed FROM dbo.AuthenticationRecord ar
+               WHERE ar.PersonId=p.PersonId ORDER BY AuthTime DESC,RecordId DESC) a
+   WHERE p.LastAuthTime IS NULL OR p.LastAuthTime<a.AuthTime;
+ END;
+ ALTER TABLE dbo.AuthenticationRecord DROP CONSTRAINT IF EXISTS CK_Authentication_Result;
+ ALTER TABLE dbo.AuthenticationRecord DROP CONSTRAINT IF EXISTS CK_Authentication_FirstClaim;
+ ALTER TABLE dbo.AuthenticationRecord DROP CONSTRAINT IF EXISTS DF_Authentication_Time;
+ DROP INDEX IF EXISTS IX_Auth_PersonTime ON dbo.AuthenticationRecord;
+ DROP INDEX IF EXISTS UX_Auth_ClaimSocialNo ON dbo.AuthenticationRecord;
+
+ DELETE FROM dbo.AuthenticationRecord WHERE Passed=0 OR ClaimRecorded=0;
  UPDATE ar SET ClaimSocialNo=COALESCE(p.SocialNo,ar.ArchivedSocialNo)
   FROM dbo.AuthenticationRecord ar LEFT JOIN dbo.Person p ON ar.PersonId=p.PersonId
-  WHERE ar.ClaimRecorded=1 AND ar.ClaimSocialNo IS NULL;
+  WHERE ar.ClaimSocialNo IS NULL;
  ;WITH RankedClaims AS (
-  SELECT RecordId,ROW_NUMBER() OVER(PARTITION BY ClaimSocialNo ORDER BY ClaimTime,AuthTime,RecordId) AS rn
-  FROM dbo.AuthenticationRecord WHERE ClaimRecorded=1 AND ClaimSocialNo IS NOT NULL
+  SELECT ROW_NUMBER() OVER(PARTITION BY ClaimSocialNo ORDER BY ClaimTime,AuthTime,RecordId) AS rn
+  FROM dbo.AuthenticationRecord WHERE ClaimSocialNo IS NOT NULL
  )
- UPDATE ar SET ClaimRecorded=0,ClaimTime=NULL,ClaimSocialNo=NULL
-  FROM dbo.AuthenticationRecord ar JOIN RankedClaims r ON ar.RecordId=r.RecordId WHERE r.rn>1;
- ALTER TABLE dbo.AuthenticationRecord WITH CHECK ADD CONSTRAINT CK_Authentication_Result CHECK (
-  (Passed=1 AND (PersonId IS NOT NULL OR (ArchivedSocialNo IS NOT NULL AND ArchivedPersonName IS NOT NULL AND ArchivedUnitId IS NOT NULL AND ArchivedUnitName IS NOT NULL)) AND FailureReason IS NULL
-   AND ((ClaimRecorded=1 AND ClaimTime IS NOT NULL AND ClaimSocialNo IS NOT NULL) OR (ClaimRecorded=0 AND ClaimTime IS NULL AND ClaimSocialNo IS NULL)))
-  OR (Passed=0 AND ClaimRecorded=0 AND ClaimTime IS NULL AND ClaimSocialNo IS NULL AND FailureReason IS NOT NULL));
- CREATE UNIQUE INDEX UX_Auth_ClaimSocialNo ON dbo.AuthenticationRecord(ClaimSocialNo) WHERE ClaimSocialNo IS NOT NULL;
+ DELETE FROM RankedClaims WHERE rn>1;
+
+ ALTER TABLE dbo.AuthenticationRecord ALTER COLUMN ClaimSocialNo nvarchar(30) NOT NULL;
+ ALTER TABLE dbo.AuthenticationRecord ALTER COLUMN ClaimTime datetime2 NOT NULL;
+ ALTER TABLE dbo.AuthenticationRecord DROP COLUMN Passed,ClaimRecorded,FailureReason,AuthTime,ArchivedSocialNo;
+ ALTER TABLE dbo.AuthenticationRecord WITH CHECK ADD CONSTRAINT CK_Authentication_Archive CHECK (
+  PersonId IS NOT NULL OR (ArchivedPersonName IS NOT NULL AND ArchivedUnitId IS NOT NULL AND ArchivedUnitName IS NOT NULL));
+ ');
 END;
-COMMIT TRANSACTION;
-GO
--- 领取记录只保存首次成功；最新认证状态单独保存在人员表，仍可统计认证失败人员。
-SET XACT_ABORT ON;
-BEGIN TRANSACTION;
-IF NOT EXISTS(SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.AuthenticationRecord') AND name=N'CK_Authentication_FirstClaim')
-BEGIN
- UPDATE p SET LastAuthTime=a.AuthTime,LastAuthPassed=a.Passed FROM dbo.Person p
-  CROSS APPLY(SELECT TOP(1) AuthTime,Passed FROM dbo.AuthenticationRecord ar WHERE ar.PersonId=p.PersonId ORDER BY AuthTime DESC,RecordId DESC) a;
- DELETE FROM dbo.AuthenticationRecord WHERE Passed=0 OR ClaimRecorded=0;
- IF EXISTS(SELECT 1 FROM sys.check_constraints WHERE parent_object_id=OBJECT_ID(N'dbo.AuthenticationRecord') AND name=N'CK_Authentication_Result')
-  ALTER TABLE dbo.AuthenticationRecord DROP CONSTRAINT CK_Authentication_Result;
- ALTER TABLE dbo.AuthenticationRecord WITH CHECK ADD CONSTRAINT CK_Authentication_FirstClaim CHECK (
-  Passed=1 AND ClaimRecorded=1 AND ClaimTime IS NOT NULL AND ClaimSocialNo IS NOT NULL AND FailureReason IS NULL
-  AND (PersonId IS NOT NULL OR (ArchivedSocialNo IS NOT NULL AND ArchivedPersonName IS NOT NULL AND ArchivedUnitId IS NOT NULL AND ArchivedUnitName IS NOT NULL)));
-END;
+IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.AuthenticationRecord') AND name=N'UX_Auth_ClaimSocialNo')
+ CREATE UNIQUE INDEX UX_Auth_ClaimSocialNo ON dbo.AuthenticationRecord(ClaimSocialNo);
+IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.AuthenticationRecord') AND name=N'IX_Auth_Person')
+ CREATE INDEX IX_Auth_Person ON dbo.AuthenticationRecord(PersonId);
 COMMIT TRANSACTION;
 GO
 IF OBJECT_ID(N'dbo.OperationLog',N'U') IS NULL
@@ -117,8 +116,6 @@ CREATE TABLE dbo.OperationLog (
  OperationContent nvarchar(200) NOT NULL,
  Result nvarchar(20) NOT NULL
 );
-IF NOT EXISTS(SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID(N'dbo.AuthenticationRecord') AND name=N'IX_Auth_PersonTime')
- CREATE INDEX IX_Auth_PersonTime ON dbo.AuthenticationRecord(PersonId,AuthTime DESC,RecordId DESC);
 IF NOT EXISTS(SELECT 1 FROM dbo.Unit WHERE UnitName=N'第一单位') INSERT dbo.Unit(UnitName) VALUES(N'第一单位');
 IF NOT EXISTS(SELECT 1 FROM dbo.Unit WHERE UnitName=N'第二单位') INSERT dbo.Unit(UnitName) VALUES(N'第二单位');
 -- 首次运行由程序生成加盐密码散列并创建 admin 账户；脚本不存放明文密码。

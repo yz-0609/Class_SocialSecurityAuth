@@ -12,62 +12,68 @@ namespace SocialSecurityAuth
         private readonly AdminSession session;
         private readonly FaceService face;
         private readonly bool preview;
-        private int personId, adminId;
+        private int personId;
         private bool ready, enrolling;
         private PersonInput pendingPerson;
-        public ManageForm() : this(new AppRepository(Database.ConnectionString), null, null, true) { }
-        public ManageForm(AppRepository repository, AdminSession session, FaceService face, bool preview)
+        public ManageForm()
+        {
+            InitializeComponent();
+        }
+        public ManageForm(AppRepository repository, AdminSession session, FaceService face, bool preview) : this()
         {
             this.repository = repository; this.session = session; this.face = face; this.preview = preview;
-            InitializeComponent();
-            Shown += OnShown; FormClosing += OnClosing;
+            currentAccountLabel.Text = "当前管理员：" + (session == null ? "界面设计" : session.Account);
         }
+        private void BackToRecognition(object sender, EventArgs e) { Close(); }
+        private void NewPerson(object sender, EventArgs e) { ClearPerson(); }
+        private void ReconnectCamera(object sender, EventArgs e) { Safe(ConnectCamera); }
+        private void QueryPeople(object sender, EventArgs e) { Safe(RefreshPeople); }
+        private void QueryRecords(object sender, EventArgs e) { Safe(RefreshRecords); }
+        private void QueryStatistics(object sender, EventArgs e) { Safe(RefreshStatistics); }
+        private void QueryLogs(object sender, EventArgs e) { Safe(RefreshLogs); }
+        private void TabsSelectedIndexChanged(object sender, EventArgs e) { Safe(RefreshSelectedTab); }
+        private void GridDataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e) { Ui.FormatGrid((DataGridView)sender); }
         private void OnShown(object sender, EventArgs e)
         {
             if (LicenseManager.UsageMode == LicenseUsageMode.Designtime || session == null) return;
-            ApplyPermissions();
             if (face != null) { face.Enrolled += OnEnrolled; face.Error += OnDeviceError; }
             ready = true;
-            Safe(() => { RefreshUnits(); RefreshSelectedTab(); if (session.Can(Permission.People)) { ClearPerson(); if (!preview) ConnectCamera(); } });
+            Safe(() => {
+                RefreshUnits();
+                RefreshSelectedTab();
+                ClearPerson();
+                if (!preview) ConnectCamera();
+            });
         }
-        private void ApplyPermissions()
-        {
-            TabPage[] pages = { peopleTab, recordsTab, statisticsTab, adminsTab, logsTab };
-            Permission[] required = { Permission.People, Permission.Records, Permission.Statistics, Permission.Accounts, Permission.Logs };
-            for (int i = 0; i < pages.Length; i++) if (!session.Can(required[i])) tabs.TabPages.Remove(pages[i]);
-            if (tabs.TabPages.Count == 0) status.Text = "当前账户没有管理权限，请返回。";
-        }
+        // 查询和设备操作统一在入口捕获异常，刷新方法内部不再重复包裹。
         private void Safe(Action action)
         {
             try { action(); }
             catch (Exception ex) { status.Text = ex.Message; Ui.Error(this, ex); }
         }
+        // 写入操作显示结果；失败只提示，成功日志由对应的数据库事务保存。
         private void Mutation(string action, Action operation)
         {
             try { operation(); status.Text = action + "成功"; }
             catch (Exception ex)
             {
-                try { repository.RecordFailedOperation(session, action + "：" + ex.Message); } catch { }
                 status.Text = action + "未完成"; Ui.Error(this, ex);
             }
         }
         private void RefreshUnits()
         {
             DataTable units = repository.GetUnits();
-            Ui.FillUnits(peopleUnit, units, true); Ui.FillUnits(recordUnit, units, true); Ui.FillUnits(statisticsUnit, units, true);
+            Ui.FillUnits(peopleUnit, units); Ui.FillUnits(recordUnit, units); Ui.FillUnits(statisticsUnit, units);
             string text = personUnit.Text; personUnit.Items.Clear(); foreach (DataRow r in units.Rows) personUnit.Items.Add((string)r["UnitName"]);
             personUnit.Text = text.Length > 0 ? text : units.Rows.Count > 0 ? (string)units.Rows[0]["UnitName"] : "";
         }
         private void RefreshSelectedTab()
         {
             if (!ready || tabs.SelectedTab == null) return;
-            Safe(() => {
-                if (tabs.SelectedTab == peopleTab) RefreshPeople();
-                else if (tabs.SelectedTab == recordsTab) RefreshRecords();
-                else if (tabs.SelectedTab == statisticsTab) RefreshStatistics();
-                else if (tabs.SelectedTab == adminsTab) RefreshAdmins();
-                else if (tabs.SelectedTab == logsTab) RefreshLogs();
-            });
+            if (tabs.SelectedTab == peopleTab) RefreshPeople();
+            else if (tabs.SelectedTab == recordsTab) RefreshRecords();
+            else if (tabs.SelectedTab == statisticsTab) RefreshStatistics();
+            else if (tabs.SelectedTab == logsTab) RefreshLogs();
         }
         private void OnSelectingTab(object sender, TabControlCancelEventArgs e) { if (enrolling) { e.Cancel = true; status.Text = "请先完成或取消人脸采集。"; } }
         private void RefreshPeople()
@@ -86,9 +92,9 @@ namespace SocialSecurityAuth
         private void ClearRecordsAndRefresh()
         {
             repository.ClearRecords(session); RefreshRecords();
-            if (session.Can(Permission.People)) RefreshPeople();
-            if (session.Can(Permission.Statistics)) RefreshStatistics();
-            if (session.Can(Permission.Logs)) RefreshLogs();
+            RefreshPeople();
+            RefreshStatistics();
+            RefreshLogs();
         }
         private void RefreshStatistics()
         {
@@ -101,7 +107,6 @@ namespace SocialSecurityAuth
             if (statisticsGrid.Columns.Contains("Gender")) statisticsGrid.Columns["Gender"].Visible = false;
             statisticsNote.Text = "当前名单共 " + list.Rows.Count + " 人；按人员最近一次识别状态统计，未知人员失败不归属单位。";
         }
-        private void RefreshAdmins() { adminsGrid.DataSource = repository.GetAdmins(session); adminsGrid.ClearSelection(); }
         private void RefreshLogs() { logsGrid.DataSource = repository.GetLogs(session); }
         private void SelectPerson(object sender, DataGridViewCellEventArgs e)
         {
@@ -147,6 +152,7 @@ namespace SocialSecurityAuth
                 if (face == null || !face.DeviceAvailable) ConnectCamera();
                 if (face == null || !face.DeviceAvailable) throw new InvalidOperationException("设备尚未连接。");
                 SetEnrolling(true);
+                // 沿用课堂demo：点击注册按钮后启动人脸采集。
                 try { face.StartEnrollment(); enrollmentStatus.Text = "正在采集，请正对摄像头"; }
                 catch { SetEnrolling(false); pendingPerson = null; throw; }
             });
@@ -157,6 +163,7 @@ namespace SocialSecurityAuth
             PersonInput captured = pendingPerson; pendingPerson = null; SetEnrolling(false);
             if (!args.Passed) { enrollmentStatus.Text = args.Message; MainForm.Play("zcsb.wav"); return; }
             Mutation("人脸注册", () => {
+                // 沿用课堂demo的流程：采集成功后保存人员与人脸模板。
                 repository.SavePerson(session, captured, args.Template); RefreshUnits(); RefreshPeople(); ClearPerson();
                 enrollmentStatus.Text = captured.Name + "注册成功，模板已保存。\r\n现可直接填写下一位人员的信息。"; MainForm.Play("zccg.wav");
                 // 重建模块与模板库，确保删除或重采集后没有残留索引。
@@ -174,31 +181,6 @@ namespace SocialSecurityAuth
         }
         private void CancelEnrollment(object sender, EventArgs e)
         { Safe(() => { try { if (face != null) face.Stop(); } finally { pendingPerson = null; SetEnrolling(false); enrollmentStatus.Text = "已取消采集"; } }); }
-        private void ClearAdmin()
-        { adminId = 0; adminAccount.Clear(); adminName.Clear(); adminPassword.Clear(); foreach (var c in permissionChecks) c.Checked = false; adminsGrid.ClearSelection(); adminAccount.Focus(); }
-        private void SelectAdmin(object sender, DataGridViewCellEventArgs e)
-        {
-            if (e.RowIndex < 0) return;
-            var row = ((DataRowView)adminsGrid.Rows[e.RowIndex].DataBoundItem).Row;
-            adminId = (int)row["AdminId"]; adminAccount.Text = (string)row["Account"]; adminName.Text = (string)row["AdminName"]; adminPassword.Clear();
-            int flags = (int)row["PermissionFlags"]; for (int i = 0; i < 5; i++) permissionChecks[i].Checked = (flags & (1 << i)) != 0;
-        }
-        private void SaveAdmin(object sender, EventArgs e)
-        {
-            Mutation("保存管理人员", () => {
-                Permission permissions = Permission.None; for (int i = 0; i < 5; i++) if (permissionChecks[i].Checked) permissions |= (Permission)(1 << i);
-                int saved = repository.SaveAdmin(session, adminId, adminAccount.Text, adminName.Text, adminPassword.Text, permissions);
-                adminId = saved; adminPassword.Clear();
-                if (saved == session.AdminId) { MessageBox.Show(this, "当前账户信息或权限已更新，请重新登录管理界面。"); Close(); return; }
-                RefreshAdmins();
-            });
-        }
-        private void DeleteAdmin(object sender, EventArgs e)
-        {
-            if (adminId == 0) { MessageBox.Show(this, "请先从表格选择管理人员。"); return; }
-            if (MessageBox.Show(this, "删除选中的管理人员？", "删除确认", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            Mutation("删除管理人员", () => { repository.DeleteAdmin(session, adminId); ClearAdmin(); RefreshAdmins(); });
-        }
         private void OnClosing(object sender, FormClosingEventArgs e)
         {
             if (face != null)

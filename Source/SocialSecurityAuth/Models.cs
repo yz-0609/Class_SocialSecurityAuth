@@ -1,15 +1,11 @@
 using System;
 namespace SocialSecurityAuth
 {
-    [Flags]
-    public enum Permission { None = 0, People = 1, Records = 2, Statistics = 4, Accounts = 8, Logs = 16, All = 31 }
+    // 登录后只需保留管理员编号和账号，用于身份校验、界面显示和操作日志。
     public sealed class AdminSession
     {
         public int AdminId { get; set; }
         public string Account { get; set; }
-        public string Name { get; set; }
-        public Permission Permissions { get; set; }
-        public bool Can(Permission permission) { return (Permissions & permission) == permission; }
     }
     public sealed class PersonInput
     {

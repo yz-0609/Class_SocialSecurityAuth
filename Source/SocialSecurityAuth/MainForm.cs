@@ -11,19 +11,25 @@ namespace SocialSecurityAuth
 {
     public partial class MainForm : Form
     {
-        private readonly AppRepository repository;
+        private AppRepository repository;
         private readonly bool preview;
         private FaceService face;
         private bool databaseReady, initializing;
-        public MainForm() : this(new AppRepository(Database.ConnectionString), false) { }
-        public MainForm(AppRepository repository, bool preview)
+        public MainForm()
+        {
+            InitializeComponent(); ClockTick(this, EventArgs.Empty);
+        }
+        public MainForm(AppRepository repository, bool preview) : this()
         {
             this.repository = repository; this.preview = preview;
-            InitializeComponent(); Shown += OnShown;
         }
+        private void ClockTick(object sender, EventArgs e) { clockLabel.Text = DateTime.Now.ToString("yyyy年MM月dd日 HH:mm:ss"); }
+        private void GridDataBindingComplete(object sender, DataGridViewBindingCompleteEventArgs e) { Ui.FormatGrid((DataGridView)sender); }
         private async void OnShown(object sender, EventArgs e)
         {
             if (LicenseManager.UsageMode == LicenseUsageMode.Designtime) return;
+            if (repository == null) repository = new AppRepository(Database.ConnectionString);
+            clockTimer.Start();
             if (preview) { repository.CheckConnection(); databaseReady = true; databaseStatus.Text = "数据库：已连接"; identifyStatus.Text = "识别：界面检查"; RefreshRecent(); prompt.Text = "界面检查模式，未开启摄像头"; identifyButton.Enabled = false; return; }
             await InitializeSystem();
         }
@@ -89,6 +95,7 @@ namespace SocialSecurityAuth
                 bool passed = args.Passed && person != null;
                 bool newClaim;
                 repository.RecordAuthentication(person == null ? null : args.PersonId, passed, passed ? null : args.Reason, out newClaim);
+                // 沿用课堂demo：根据识别结果显示对应人员的信息。
                 socialNoValue.Text = person == null ? "—" : (string)person["SocialNo"];
                 nameValue.Text = person == null ? "未知人员" : (string)person["PersonName"];
                 unitValue.Text = person == null ? "—" : (string)person["UnitName"];
@@ -96,6 +103,7 @@ namespace SocialSecurityAuth
                 resultValue.Text = passed ? "认证通过" : "认证未通过"; resultValue.ForeColor = passed ? Color.DarkGreen : Color.Firebrick;
                 claimValue.Text = passed ? (newClaim ? "首次领取已登记" : "已领取，本次不重复登记") : "未登记";
                 prompt.Text = passed ? (newClaim ? "认证通过，首次领取信息已记录" : "认证通过，该人员已领取，本次不新增领取记录") : "认证未通过，请联系管理人员";
+                // 沿用课堂demo：识别成功或失败时播放对应的提示音。
                 Play(passed ? "sbcg.wav" : "sbsb.wav"); RefreshRecent();
             }
             catch (Exception ex)
@@ -108,7 +116,7 @@ namespace SocialSecurityAuth
         private void RefreshRecent()
         {
             DataTable t = repository.GetRecentRecords();
-            var view = new DataView(t).ToTable(false, "PersonName", "AuthResult", "AuthTime"); recentGrid.DataSource = view;
+            var view = new DataView(t).ToTable(false, "PersonName", "ClaimTime"); recentGrid.DataSource = view;
         }
         private void OpenManagement(object sender, EventArgs e)
         {

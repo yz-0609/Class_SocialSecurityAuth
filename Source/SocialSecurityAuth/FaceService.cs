@@ -33,6 +33,7 @@ namespace SocialSecurityAuth
         public FaceService(AppRepository repository)
         {
             this.repository = repository;
+            // 沿用课堂demo：使用 BioFPCtrl 控件及注册、识别回调。
             control = new BioFPCtrl { Dock = DockStyle.Fill, BackColor = Color.WhiteSmoke, Name = "bioFPCtrl1" };
             control.IdentifyNotify += OnIdentify;
             control.EnrollNotify += OnEnroll;
@@ -52,10 +53,12 @@ namespace SocialSecurityAuth
             IntPtr handle = control.Handle;
             try
             {
+                // 沿用课堂demo：调用 ModuleLoad 加载人脸模块。
                 deviceFault = false; Check(control.ModuleLoad(), "加载人脸模块"); Loaded = true; LoadTemplates();
             }
             catch { Unload(); throw; }
         }
+        // 沿用课堂demo：拼接人脸模板、建立人员索引，再用 SetFaceCode 加载。
         private void LoadTemplates()
         {
             people.Clear();
@@ -78,6 +81,7 @@ namespace SocialSecurityAuth
             Stop();
             if (people.Count == 0) return false;
             mode = Mode.Identifying; lastCallback = clock.ElapsedMilliseconds - 2000;
+            // 沿用课堂demo：调用 Identify 启动人脸识别。
             try { Check(control.Identify(), "启动人脸识别"); return true; }
             catch { mode = Mode.Idle; throw; }
         }
@@ -85,12 +89,14 @@ namespace SocialSecurityAuth
         {
             if (!DeviceAvailable) throw new InvalidOperationException("人脸设备尚未连接或采集异常，请重新连接。");
             Stop(); mode = Mode.Enrolling;
+            // 沿用课堂demo：调用 Enroll 采集并注册人脸。
             try { Check(control.Enroll(), "启动人脸采集"); }
             catch { mode = Mode.Idle; throw; }
         }
         public void Stop()
         {
             generation++; bool wasActive = mode != Mode.Idle; mode = Mode.Idle;
+            // 沿用课堂demo：调用 Cancel 停止当前操作。
             if (Loaded && wasActive) Check(control.Cancel(), "停止采集或识别");
         }
         public void Unload()
@@ -113,13 +119,16 @@ namespace SocialSecurityAuth
             try { control.BeginInvoke(new Action(() => { if (!disposed && token == generation) action(); })); }
             catch (InvalidOperationException) { /* 退出时窗口句柄可能已经销毁。 */ }
         }
+        // 沿用课堂demo：处理 IdentifyNotify 返回的识别结果。
         private void OnIdentify(object sender, int result, int faceIndex)
         {
             if (mode != Mode.Identifying) return;
             int token = generation;
             if (result <= 0 && result != BioFPCtrl.BioFP_ERROR_IDENTIFY_FAILED) return;
+            // 沿用课堂demo：识别结果按两秒间隔处理。
             if (clock.ElapsedMilliseconds - lastCallback < 2000) return;
             lastCallback = clock.ElapsedMilliseconds;
+            // 沿用课堂demo：根据识别索引查回对应人员。
             int person; bool known = people.TryGetValue(faceIndex, out person);
             var args = new IdentificationEventArgs {
                 Passed = result > 0 && known,
@@ -148,6 +157,7 @@ namespace SocialSecurityAuth
             }
             catch (InvalidOperationException) { }
         }
+        // 沿用课堂demo：处理 EnrollNotify 返回的注册结果和人脸模板。
         private void OnEnroll(object sender, int result, int faceIndex, uint quality, byte[] template, Bitmap image)
         {
             if (mode != Mode.Enrolling) return;
